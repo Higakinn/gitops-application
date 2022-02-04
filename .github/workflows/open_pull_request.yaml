@@ -1,0 +1,17 @@
+name: GitOps-Demo CI 
+
+on: push
+
+jobs:
+  open_pull_request:
+    # if: contains( github.ref, 'release') #developブランチにpushされたときに実行する
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout other repo
+        uses: actions/checkout@v2
+        with:
+          repository: hgaiji/gitops-k8smanifest
+          path: staging
+      - name: check current dir
+        run: |
+          ls -al
