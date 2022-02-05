@@ -1,5 +1,4 @@
 name: GitOps-Demo CI 
-
 on: push
 
 jobs:
@@ -12,10 +11,26 @@ jobs:
         with:
           repository: hgaiji/gitops-k8smanifest
           path: manifest
+          token: ${{ secrets.PAT }}
       - name: update k8s manifest
         run: | 
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod a+x /usr/local/bin/yq
           IMAGE_TAG=$(echo ${{ github.ref }} | sed -e "s#refs/heads/release/##g") 
-          yq eval ".spec.template.spec.containers[0].image=\"hoge:$IMAGE_TAG\"" './manifest/staging/deployment.yaml'
+          yq eval --inplace ".spec.template.spec.containers[0].image=\"hoge:$IMAGE_TAG\"" './manifest/staging/deployment.yaml'
           cat ./manifest/staging/deployment.yaml
+      - name: create commit 
+        run: |
+          cd ./manifest
+          git config --global user.name 'hgaiji'
+          git config --global user.email "${GH_EMAIL}"
+          git remote set-url origin 'https://github.com/hgaiji/gitops-k8smanifest.git'
+          git checkout -b prtest
+          git add ./staging/deployment.yaml
+          git commit -m "update docker image version in k8s manifest"
+          echo -n $GITHUB_TOKEN
+          git push --set-upstream origin prtest
+          hub pull-request -b main -m "Release"
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT }}
+          GH_EMAIL: ${secrets.EMAIL}
