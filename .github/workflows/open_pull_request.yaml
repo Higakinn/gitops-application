@@ -1,36 +1,48 @@
 name: GitOps-Demo CI 
 on: push
 
+env: # global環境変数を設定
+  CR_NAME: ${{ secrets.CONTAINER_REGISTORY_NAME }}
+  CR_USER: ${{ secrets.CONTAINER_REGISTORY_USER }}
+  IMAGE_NAME: ${{ secrets.IMAGE_NAME }}
+  GH_WORKDIR: manifest
+  GH_REPOSITORY: ${{ secrets.GH_REPOSITORY }}
 jobs:
   open_pull_request:
     if: contains( github.ref, 'release') #developブランチにpushされたときに実行する
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: $GH_WORKDIR
     steps:
-      - name: Checkout other repo
+      - name: Checkout Manifest Repository
         uses: actions/checkout@v2
         with:
-          repository: hgaiji/gitops-k8smanifest
-          path: manifest
+          repository: ${{ secrets.GH_REPOSITORY }}
+          path: $GH_WORKDIR
           token: ${{ secrets.PAT }}
-      - name: update k8s manifest
+      - name: Update K8s Manifest
+        id: config
         run: | 
+          # yq コマンドのinstall
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod a+x /usr/local/bin/yq
           IMAGE_TAG=$(echo ${{ github.ref }} | sed -e "s#refs/heads/release/##g") 
-          yq eval --inplace ".spec.template.spec.containers[0].image=\"hoge:$IMAGE_TAG\"" './manifest/staging/deployment.yaml'
-          cat ./manifest/staging/deployment.yaml
-      - name: create commit 
+          IMAGE_NAME_WITH_CR="${CR_NAME}/${CR_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+          yq eval --inplace ".spec.template.spec.containers[0].image=\"${IMAGE_NAME_WITH_CR}\"" './staging/deployment.yaml'
+          cat ./staging/deployment.yaml
+          echo "::set-output name=RELEASE_VERSION::${IMAGE_TAG}"
+      - name: Create Pull-Requset
         run: |
-          cd ./manifest
-          git config --global user.name 'hgaiji'
-          git config --global user.email "${GH_EMAIL}"
-          git remote set-url origin 'https://github.com/hgaiji/gitops-k8smanifest.git'
-          git checkout -b prtest
-          git add ./staging/deployment.yaml
-          git commit -m "update docker image version in k8s manifest"
-          echo -n $GITHUB_TOKEN
-          git push --set-upstream origin prtest
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+          git remote set-url origin "https://github.com/${GH_REPOSITORY}.git"
+          git checkout -b ${BRANCH_NAME}
+          git add .
+          git commit -m "update docker image version ${RELEASE_VERSION} in k8s manifest"
+          git push --set-upstream origin ${BRANCH_NAME}
           hub pull-request -b main -m "Release"
         env:
           GITHUB_TOKEN: ${{ secrets.PAT }}
-          GH_EMAIL: ${secrets.EMAIL}
+          RELEASE_VERSION: ${{steps.config.outputs.RELEASE_VERSION}}
+          BRANCH_NAME: prtest/${{steps.config.outputs.RELEASE_VERSION}}
