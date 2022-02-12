@@ -59,7 +59,7 @@ jobs:
           # yq コマンドのinstall
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod a+x /usr/local/bin/yq
-          IMAGE_NAME_WITH_CR="${CR_NAME}/${CR_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+          IMAGE_NAME_WITH_CR="${CR_NAME}/${CR_USER}/${IMAGE_NAME}:${{steps.config.outputs.RELEASE_VERSION}}"
           yq eval --inplace ".spec.template.spec.containers[0].image=\"${IMAGE_NAME_WITH_CR}\"" './staging/deployment.yaml'
           cat ./staging/deployment.yaml
       - name: Create Pull-Requset
