@@ -47,12 +47,12 @@ jobs:
       - name: SetUp Git
         id: config
         run: |
-          IMAGE_TAG=$(echo ${{ github.ref }} | sed -e "s#refs/heads/release/##g") 
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
           git remote set-url origin "https://github.com/${GH_REPOSITORY}.git"
           git fetch
-          git checkout -b prtest/${IMAGE_TAG} origin/prtest/${IMAGE_TAG} || git checkout -b prtest/${IMAGE_TAG}
+          git checkout -b prtest/${{ github.sha }} origin/prtest/${{ github.sha  }} || git checkout -b prtest/${{ github.sha }}
+          IMAGE_TAG=$(echo ${{ github.ref }} | sed -e "s#refs/heads/release/##g")
           echo "::set-output name=RELEASE_VERSION::${IMAGE_TAG}"
       - name: Update K8s Manifest
         run: | 
@@ -74,4 +74,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.PAT }}
           RELEASE_VERSION: ${{steps.config.outputs.RELEASE_VERSION}}
-          BRANCH_NAME: prtest/${{steps.config.outputs.RELEASE_VERSION}}
+          BRANCH_NAME: prtest/${{ github.sha }}
