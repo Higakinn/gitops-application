@@ -1,36 +1,51 @@
-name: GitOps-Demo CI 
+name: GitOps-Demo CI
 
-on: push
+on:
+  push:
+    branches:
+      - release
+  pull_request:
+    branches:
+      - develop
+      - main
+    types: [closed]
+
 env: # global環境変数を設定
   CR_NAME: ${{ secrets.CONTAINER_REGISTORY_NAME }}
   CR_USER: ${{ secrets.CONTAINER_REGISTORY_USER }}
+  CR_PASS: ${{ secrets.CR_PAT }}
   IMAGE_NAME: ${{ secrets.IMAGE_NAME }}
   GH_WORKDIR: manifest
   GH_REPOSITORY: ${{ secrets.GH_REPOSITORY }}
+
 jobs:
   push_docker_image:
-    if: contains( github.ref, 'release') #developブランチにpushされたときに実行する
+    if: contains( github.ref, 'release') #releaseブランチにpushされたときに実行する
     runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.dockerimagetag.outputs.RELEASE_VERSION }}
     steps:
       - name: Git checkout current branch
         uses: actions/checkout@v2
         with:
           ref: ${{ github.ref }}
       - name: Build docker image
-        run: docker build -t $IMAGE_NAME -f ./docker/Dockerfile . 
+        run: docker build -t $IMAGE_NAME -f ./docker/Dockerfile .
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v1
         with:
-          registry: ${{ secrets.CONTAINER_REGISTORY_NAME }}
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.CR_PAT }}
-      - name: Push Docker image to Container Registry
-        run: |  
-            IMAGE_TAG=$(echo ${{ github.ref }} | sed -e "s#refs/heads/release/##g")
-            IMAGE_NAME_WITH_CR="${CR_NAME}/${CR_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
-            docker tag $IMAGE_NAME "${IMAGE_NAME_WITH_CR}"
-            docker push "${IMAGE_NAME_WITH_CR}"
-  open_pull_request:
+          registry: ${{ env.CR_NAME }}
+          username: ${{ env.CR_USER }}
+          password: ${{ env.CR_PASS }}
+      - name: Push docker image to Container Registry
+        id: dockerimagetag
+        run: |
+          IMAGE_TAG=$(echo ${{ github.ref }} | sed -e "s#refs/heads/release/##g")
+          IMAGE_NAME_WITH_CR="${CR_NAME}/${CR_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+          docker tag $IMAGE_NAME "${IMAGE_NAME_WITH_CR}"
+          docker push "${IMAGE_NAME_WITH_CR}"
+          echo "::set-output name=RELEASE_VERSION::${IMAGE_TAG}"
+  open_pull_request_to_k8s_manifest_repo:
     if: contains( github.ref, 'release') #developブランチにpushされたときに実行する
     runs-on: ubuntu-latest
     needs: push_docker_image
@@ -41,7 +56,7 @@ jobs:
       - name: Checkout Manifest Repository
         uses: actions/checkout@v2
         with:
-          repository: ${{ secrets.GH_REPOSITORY }}
+          repository: ${{ env.GH_REPOSITORY }}
           path: $GH_WORKDIR
           token: ${{ secrets.PAT }}
       - name: SetUp Git
@@ -51,22 +66,17 @@ jobs:
           git config --global user.name "GitHub Action"
           git remote set-url origin "https://github.com/${GH_REPOSITORY}.git"
           git fetch
-          git checkout -b prtest/${{ github.sha }} origin/prtest/${{ github.sha  }} || git checkout -b prtest/${{ github.sha }}
-          IMAGE_TAG=$(echo ${{ github.ref }} | sed -e "s#refs/heads/release/##g")
-          echo "::set-output name=RELEASE_VERSION::${IMAGE_TAG}"
+          IMAGE_TAG=${{ needs.push_docker_image.image_tag }}
+          git checkout -b test/${{ github.sha }} origin/test/${IMAGE_TAG} || git checkout -b test/${{ github.sha }}
       - name: Update K8s Manifest
-        run: | 
+        run: |
           # yq コマンドのinstall
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod a+x /usr/local/bin/yq
-          IMAGE_NAME_WITH_CR="${CR_NAME}/${CR_USER}/${IMAGE_NAME}:${{steps.config.outputs.RELEASE_VERSION}}"
+          IMAGE_NAME_WITH_CR="${CR_NAME}/${CR_USER,,}/${IMAGE_NAME}:${{steps.config.outputs.RELEASE_VERSION}}"
           yq eval --inplace ".spec.template.spec.containers[0].image=\"${IMAGE_NAME_WITH_CR}\"" './staging/deployment.yaml'
-          cat ./staging/deployment.yaml
       - name: Create Pull-Requset
         run: |
-          # git config --global user.email "action@github.com"
-          # git config --global user.name "GitHub Action"
-          # git remote set-url origin "https://github.com/${GH_REPOSITORY}.git"
           git add .
           git commit -m "update docker image version ${RELEASE_VERSION} in k8s manifest" || :
           git push --set-upstream origin ${BRANCH_NAME}
